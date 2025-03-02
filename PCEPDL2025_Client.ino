@@ -1,20 +1,26 @@
-/**************************************************************************
+/*************************************************************************************
+*                             PCEPDL2025 Client
+*  This client is to be used for the PCEP 2025 Drumline competition.  This code is 
+*  only 1 of 5 parts needed for the entire projectL:
+*  - PCEPDL2025_Client - runs on an ESP8266 and is wired directly to the LED panels.
+*  - PECPDL2025_Commander - Connects to MQTT Broker and sends mode commands
+*  - PCEPDL2025_MQTT_Broker - acts as MQTT broker and WiFi Access Point
+*  - PCEPDL2025_EEPROM_Write - Writes the ID values to the individual clients
 *
+*  @Author - Joseph Rork
 *
-*
-***************************************************************************/
+**************************************************************************************/
 
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 #include <EEPROM.h>
 #include <ArduinoJson.h>
-// #include <FastLED.h>   //FastLED is conflicting with something and crashes when 
 #include <Adafruit_NeoPixel.h>
 
 #include "PCEPDL2025_Client.h"
 #define NOOP 42
 
-uint8_t unitID = 0;
+uint8_t unitID = 0;  // Initally set to 0, updated from EEPROM
 
 const char* ssid ="ESPap";
 const char* password = "thereisnospoon";
@@ -25,15 +31,24 @@ PubSubClient client(espClient);
 unsigned long lastMsg = 0;
 #define MSG_BUFFER_SIZE	(50)
 char msg[MSG_BUFFER_SIZE];
-int ticker = 0;                 // Ticker for time since last action
+int ticker = 0;                    // Ticker for time since last action
 
 uint8_t gMode = NOOP;              // Keeps track of the mode for the LED displays
 
-#define LED_COUNT 204
 #define LED_PIN D2
+#define MATRIX_HEIGHT 6
+#define MATRIX_WIDTH 34
+#define NUM_LEDS (MATRIX_HEIGHT * MATRIX_WIDTH)
+uint8_t BRIGHTNESS = 255;
 
-// CRGB leds[NUM_LEDS];
-Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_BRG + NEO_KHZ800);
+#define RAINBOW_SPEED 500     // Change this to modify the speed at which the rainbow changes
+#define SEGMENT_COUNT 3       // Change this to divide up the entire rainbow into segments.  1 = entire rainbow shown at once
+#define NUM_OF_HUES 65535     // This is just for readability.  This is the number of values in a 16-bit number
+
+Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_BRG + NEO_KHZ800);
+
+uint16_t indexHue = 0;                                 // Keep track of this externally to ensure non-blocking code
+uint32_t singleColorValue = strip.Color(0, 255, 0);   // Single color value updated via JSON message
 
 void setup_wifi() {
   delay(10);
@@ -114,6 +129,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
         const uint32_t colorValue = strtoul(jsonDoc["color"], nullptr, 16); 
         Serial.print("Parsed color value: 0x");
         Serial.println(colorValue, HEX);
+        setSingleColorValue(colorValue);
       }
       if (jsonDoc.containsKey("offset")) {
         const uint8_t offsetValue = jsonDoc["offset"]; 
@@ -185,7 +201,7 @@ void loop() {
       stripBrokenStrings();
       break;
     case(3):
-      stripRainbow();
+      rainbow();
       break;
     case(4):
       break;
@@ -282,9 +298,21 @@ void noop() {
 
 void stripOneColor() {
   uint32_t color = strip.Color(  0, 255,   0);
+  stripOneColor(color);
+}
+
+void stripOneColor(uint8_t red, uint8_t green, uint8_t blue) {
+  stripOneColor(strip.Color(red, green, blue));
+}
+
+void stripOneColor(uint32_t color) {
   strip.fill(color);
   strip.show();                          
   setMode(NOOP);
+}
+
+void setSingleColorValue(uint32_t color) {
+  singleColorValue = color;
 }
 
 void stripBrokenStrings() {
@@ -344,39 +372,15 @@ void stripBrokenStrings() {
   setMode(NOOP);
 }
 
-void stripRainbow() {
-  for(long firstPixelHue = 0; firstPixelHue < 5*65536; firstPixelHue += 256) {
-    // strip.rainbow() can take a single argument (first pixel hue) or
-    // optionally a few extras: number of rainbow repetitions (default 1),
-    // saturation and value (brightness) (both 0-255, similar to the
-    // ColorHSV() function, default 255), and a true/false flag for whether
-    // to apply gamma correction to provide 'truer' colors (default true).
-    strip.rainbow(firstPixelHue);
-    // Above line is equivalent to:
-    // strip.rainbow(firstPixelHue, 1, 255, 255, true);
-    // delay(wait);  // Pause for a moment
+void rainbow() {
+  indexHue = indexHue + RAINBOW_SPEED;  // This is a 16-bit number which will automatically roll over to 0 after 65535
+  for (uint8_t i = 0; i < NUM_LEDS; i++)
+  {
+    uint32_t color = strip.ColorHSV(indexHue + (i* (NUM_OF_HUES/NUM_LEDS)/SEGMENT_COUNT));
+    strip.setPixelColor(i, color);
   }
-  strip.show(); // Update strip with new contents
+  strip.show();
 }
-
-// WS2812B LED Strip switches Red and Green
-// CRGB Scroll(int pos) {
-// 	CRGB color (0,0,0);
-// 	if(pos < 85) {
-// 		color.g = 0;
-// 		color.r = ((float)pos / 85.0f) * 255.0f;
-// 		color.b = 255 - color.r;
-// 	} else if(pos < 170) {
-// 		color.g = ((float)(pos - 85) / 85.0f) * 255.0f;
-// 		color.r = 255 - color.g;
-// 		color.b = 0;
-// 	} else if(pos < 256) {
-// 		color.b = ((float)(pos - 170) / 85.0f) * 255.0f;
-// 		color.g = 255 - color.b;
-// 		color.r = 1;
-// 	}
-// 	return color;
-// }
 
 bool setMode(const uint8_t mode){
   snprintf(msg, MSG_BUFFER_SIZE, "Setting mode to %i", mode);
