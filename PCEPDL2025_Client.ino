@@ -1,13 +1,14 @@
 /*************************************************************************************
 *                             PCEPDL2025 Client
 *  This client is to be used for the PCEP 2025 Drumline competition.  This code is 
-*  only 1 of 5 parts needed for the entire projectL:
+*  1 of 5 parts needed for the entire project:
 *  - PCEPDL2025_Client - runs on an ESP8266 and is wired directly to the LED panels.
 *  - PECPDL2025_Commander - Connects to MQTT Broker and sends mode commands
 *  - PCEPDL2025_MQTT_Broker - acts as MQTT broker and WiFi Access Point
 *  - PCEPDL2025_EEPROM_Write - Writes the ID values to the individual clients
 *
 *  @Author - Joseph Rork
+*  @Author - Richard Dryja
 *
 **************************************************************************************/
 
@@ -16,6 +17,9 @@
 #include <EEPROM.h>
 #include <ArduinoJson.h>
 #include <Adafruit_NeoPixel.h>
+#include <Adafruit_NeoMatrix.h>
+#include <Adafruit_GFX.h>
+
 
 #include "PCEPDL2025_Client.h"
 #define NOOP 42
@@ -45,10 +49,16 @@ uint8_t BRIGHTNESS = 255;
 #define SEGMENT_COUNT 3       // Change this to divide up the entire rainbow into segments.  1 = entire rainbow shown at once
 #define NUM_OF_HUES 65535     // This is just for readability.  This is the number of values in a 16-bit number
 
-Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_BRG + NEO_KHZ800);
+// Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_BRG + NEO_KHZ800);
+
+Adafruit_NeoMatrix matrix = Adafruit_NeoMatrix(MATRIX_WIDTH, MATRIX_HEIGHT, LED_PIN,
+  NEO_MATRIX_BOTTOM     + NEO_MATRIX_RIGHT +
+  NEO_MATRIX_ROWS + NEO_MATRIX_ZIGZAG,
+  NEO_GRB            + NEO_KHZ800);
 
 uint16_t indexHue = 0;                                 // Keep track of this externally to ensure non-blocking code
-uint32_t singleColorValue = strip.Color(0, 255, 0);   // Single color value updated via JSON message
+// uint32_t singleColorValue = strip.Color(0, 255, 0);   // Single color value updated via JSON message
+uint32_t singleColorValue = matrix.Color(0, 255, 0);   // Single color value updated via JSON message
 
 void setup_wifi() {
   delay(10);
