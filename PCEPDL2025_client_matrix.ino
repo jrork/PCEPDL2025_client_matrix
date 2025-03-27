@@ -22,7 +22,8 @@
 
 
 #include "PCEPDL2025_Client.h"
-#define NOOP 42
+#define NOOP 42                 // Randomly picked 42, just needs to be a number not represented in loop()
+
 
 uint8_t unitID = 0;  // Initally set to 0, updated from EEPROM
 
@@ -45,20 +46,23 @@ uint8_t gMode = NOOP;              // Keeps track of the mode for the LED displa
 #define NUM_LEDS (MATRIX_HEIGHT * MATRIX_WIDTH)
 uint8_t BRIGHTNESS = 255;
 
-#define RAINBOW_SPEED 500     // Change this to modify the speed at which the rainbow changes
-#define SEGMENT_COUNT 3       // Change this to divide up the entire rainbow into segments.  1 = entire rainbow shown at once
-#define NUM_OF_HUES 65535     // This is just for readability.  This is the number of values in a 16-bit number
+#define RAINBOW_SPEED 500       // Change this to modify the speed at which the rainbow changes
+#define SEGMENT_COUNT 3         // Change this to divide up the entire rainbow into segments.  1 = entire rainbow shown at once
+#define NUM_OF_HUES 65535       // This is just for readability.  This is the number of values in a 16-bit number
+#define FRAMES_PER_SECOND 60 // How fast we want to show our frames
 
-// Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_BRG + NEO_KHZ800);
+unsigned long lastFrameTime = 0;   // Keeps track of the time the last rainbow frame was drawn
+
+// Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_RGB + NEO_KHZ800);
 
 Adafruit_NeoMatrix matrix = Adafruit_NeoMatrix(MATRIX_WIDTH, MATRIX_HEIGHT, LED_PIN,
   NEO_MATRIX_BOTTOM     + NEO_MATRIX_RIGHT +
   NEO_MATRIX_ROWS + NEO_MATRIX_ZIGZAG,
-  NEO_GRB            + NEO_KHZ800);
+  NEO_RGB            + NEO_KHZ800);
 
 uint16_t indexHue = 0;                                 // Keep track of this externally to ensure non-blocking code
 // uint32_t singleColorValue = strip.Color(0, 255, 0);   // Single color value updated via JSON message
-uint32_t singleColorValue = matrix.Color(0, 255, 0);   // Single color value updated via JSON message
+const uint32_t singleColorValue = matrix.Color(255, 215, 0);   // Single color value updated via JSON message
 
 void setup_wifi() {
   delay(10);
@@ -183,9 +187,12 @@ void setup() {
   setup_wifi();                         // Connect to the WiFi of the MQTT Broker
   client.setServer(mqtt_server, 1883);  // Connect to the MQTT Broker
   client.setCallback(callback);         // Register callback() as the callback funciton for messages from Broker
-  strip.begin();                        // INITIALIZE NeoPixel strip object (REQUIRED)
-  strip.show();                         // Turn OFF all pixels ASAP
-  strip.setBrightness(50);              // Set BRIGHTNESS to about 1/5 (max = 255)  
+  // strip.begin();                        // INITIALIZE NeoPixel strip object (REQUIRED)
+  // strip.show();                         // Turn OFF all pixels ASAP
+  // strip.setBrightness(50);              // Set BRIGHTNESS to about 1/5 (max = 255)  
+  matrix.begin();
+  matrix.clear();
+  matrix.show();
   Serial.println("Setup Complete");
 }
 
@@ -201,14 +208,14 @@ void loop() {
   switch(gMode){
     case(0):
       turnOffBoardLED();
-      turnOffStrip();
+      turnOffMatrix();
       break;
     case(1):
       turnOnBoardLED();
-      stripOneColor();
+      matrixOneColor();
       break;
     case(2):
-      stripBrokenStrings();
+      matrixBrokenStrings();
       break;
     case(3):
       rainbow();
@@ -297,99 +304,138 @@ void turnOffBoardLED(){
   setMode(NOOP);
 }
 
-void turnOffStrip() {
-  strip.clear();
-  strip.show();
+void turnOffMatrix() {
+  matrix.clear();
+  matrix.show();
 }
 
 void noop() {
-
+  // Just chill.  Don't do anything.  Relax.  This is a 'No Operation'...
 }
 
-void stripOneColor() {
-  uint32_t color = strip.Color(  0, 255,   0);
-  stripOneColor(color);
-}
+// void matrixOneColor() {
+//   uint16_t color = matrix.Color(255, 215, 0);   // Single color value updated via JSON message
+//   matrixOneColor(color);
+// }
 
-void stripOneColor(uint8_t red, uint8_t green, uint8_t blue) {
-  stripOneColor(strip.Color(red, green, blue));
-}
+// void matrixOneColor(uint8_t red, uint8_t green, uint8_t blue) {
+//   matrixOneColor(matrix.Color(red, green, blue));
+// }
 
-void stripOneColor(uint32_t color) {
-  strip.fill(color);
-  strip.show();                          
+void matrixOneColor() {
+  matrix.fillScreen(matrix.Color(255, 215, 0));
+  matrix.show();                          
   setMode(NOOP);
 }
 
-void setSingleColorValue(uint32_t color) {
-  singleColorValue = color;
+void setSingleColorValue(uint16_t color) {
+  // singleColorValue = color;
 }
 
-void stripBrokenStrings() {
-  for(int i=0; i<15; i++)
-  { 
-    strip.setPixelColor(i, strip.Color(255,215,0));
+void matrixBrokenStrings() {
+  matrixOneColor();
+  for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
+    const uint8_t breakSize = random(3, 8);
+    const uint8_t randomStart = random(8, 25);
+    for (uint8_t x = randomStart; x < randomStart + breakSize; x++) {
+      if (x == MATRIX_WIDTH) break;   //bail out if we get past the end of the row but this should never happen
+      matrix.drawPixel(x, y, matrix.Color(0,0,0));
+    }
   }
-  for(int i=15; i<20; i++)
-  {
-    strip.setPixelColor(i, strip.Color(0,0,0));
-  }
-  for(int i=20; i<45; i++)
-  { 
-    strip.setPixelColor(i, strip.Color(255,215,0));
-  }
-  for(int i=46; i<50; i++)
-  {
-    strip.setPixelColor(i, strip.Color(0,0,0));
-  }
-  for(int i=50; i<80; i++)
-  {
-    strip.setPixelColor(i, strip.Color(255,215,0));
-  }
-  for(int i=81; i<86; i++)
-  {
-    strip.setPixelColor(i, strip.Color(0,0,0));
-  }
-  for(int i=86; i<118; i++)
-  {
-    strip.setPixelColor(i, strip.Color(255,215,0));
-  }
-  for(int i=118; i<123; i++)
-  {
-    strip.setPixelColor(i, strip.Color(0,0,0));
-  }
-  for(int i=123; i<148; i++)
-  {
-    strip.setPixelColor(i, strip.Color(255,215,0));
-  }
-  for(int i=148; i<152; i++)
-  {
-    strip.setPixelColor(i, strip.Color(0,0,0));
-  }
-  for(int i=152; i<185; i++)
-  {
-    strip.setPixelColor(i, strip.Color(255,215,0));
-  }
-  for(int i=185; i<190; i++)
-  {
-    strip.setPixelColor(i, strip.Color(0,0,0));
-  }
-  for(int i=190; i<203; i++)
-  {
-    strip.setPixelColor(i, strip.Color(255,215,0));
-  }
-  strip.show();
+  matrix.show();
   setMode(NOOP);
+  // for(int i=0; i<15; i++)
+  // { 
+  //   strip.setPixelColor(i, strip.Color(255,215,0));
+  // }
+  // for(int i=15; i<20; i++)
+  // {
+  //   strip.setPixelColor(i, strip.Color(0,0,0));
+  // }
+  // for(int i=20; i<45; i++)
+  // { 
+  //   strip.setPixelColor(i, strip.Color(255,215,0));
+  // }
+  // for(int i=46; i<50; i++)
+  // {
+  //   strip.setPixelColor(i, strip.Color(0,0,0));
+  // }
+  // for(int i=50; i<80; i++)
+  // {
+  //   strip.setPixelColor(i, strip.Color(255,215,0));
+  // }
+  // for(int i=81; i<86; i++)
+  // {
+  //   strip.setPixelColor(i, strip.Color(0,0,0));
+  // }
+  // for(int i=86; i<118; i++)
+  // {
+  //   strip.setPixelColor(i, strip.Color(255,215,0));
+  // }
+  // for(int i=118; i<123; i++)
+  // {
+  //   strip.setPixelColor(i, strip.Color(0,0,0));
+  // }
+  // for(int i=123; i<148; i++)
+  // {
+  //   strip.setPixelColor(i, strip.Color(255,215,0));
+  // }
+  // for(int i=148; i<152; i++)
+  // {
+  //   strip.setPixelColor(i, strip.Color(0,0,0));
+  // }
+  // for(int i=152; i<185; i++)
+  // {
+  //   strip.setPixelColor(i, strip.Color(255,215,0));
+  // }
+  // for(int i=185; i<190; i++)
+  // {
+  //   strip.setPixelColor(i, strip.Color(0,0,0));
+  // }
+  // for(int i=190; i<203; i++)
+  // {
+  //   strip.setPixelColor(i, strip.Color(255,215,0));
+  // }
+  // strip.show();
+  // setMode(NOOP);
 }
 
 void rainbow() {
-  indexHue = indexHue + RAINBOW_SPEED;  // This is a 16-bit number which will automatically roll over to 0 after 65535
-  for (uint8_t i = 0; i < NUM_LEDS; i++)
-  {
-    uint32_t color = strip.ColorHSV(indexHue + (i* (NUM_OF_HUES/NUM_LEDS)/SEGMENT_COUNT));
-    strip.setPixelColor(i, color);
+  unsigned long now = millis();
+  // if (now - lastFrameTime > (1000/FRAMES_PER_SECOND)) {
+  // if (now - lastFrameTime > 100) {
+  //   lastFrameTime = now;
+    // indexHue = indexHue + RAINBOW_SPEED;  // This is a 16-bit number which will automatically roll over to 0 after 65535
+    indexHue++;
+    for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
+      for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
+        matrix.drawPixel(x, y, matrix.ColorHSV(indexHue));
+        // matrix.drawPixel(x, y, matrix.ColorHSV(indexHue + (x * (NUM_OF_HUES/NUM_LEDS)/SEGMENT_COUNT)));
+      }
+    }
+    matrix.show();
+    delay(50);
+  // }
+  // for (uint8_t i = 0; i < NUM_LEDS; i++)
+  // {
+  //   uint32_t color = strip.ColorHSV(indexHue + (i* (NUM_OF_HUES/NUM_LEDS)/SEGMENT_COUNT));
+  //   strip.setPixelColor(i, color);
+  // }
+  // strip.show();
+}
+
+void checkMatrix() {
+  for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
+    for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
+      matrix.drawPixel(x, y, matrix.Color(0,0,255));
+      matrix.show();
+      delay(100);
+
+      matrix.drawPixel(x,y,matrix.Color(0,0,0));
+      matrix.show();
+      delay(100);
+    }
   }
-  strip.show();
 }
 
 bool setMode(const uint8_t mode){
@@ -399,3 +445,8 @@ bool setMode(const uint8_t mode){
   return true;
 }
 
+uint16_t color24to16(uint32_t color) {
+  return ((uint16_t)(((color & 0xFF0000) >> 16) & 0xF8) << 8) |
+         ((uint16_t)(((color & 0x00FF00) >>  8) & 0xFC) << 3) |
+                    (((color & 0x0000FF) >>  0)         >> 3);
+}
