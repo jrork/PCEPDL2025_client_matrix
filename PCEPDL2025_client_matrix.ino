@@ -19,6 +19,9 @@
 #include <Adafruit_NeoPixel.h>
 #include <Adafruit_NeoMatrix.h>
 #include <Adafruit_GFX.h>
+#include <ESP8266mDNS.h>        // For running OTA
+#include <WiFiUdp.h>            // For running OTA
+#include <ArduinoOTA.h>         // For running OTA
 
 
 #include "PCEPDL2025_Client.h"
@@ -46,8 +49,8 @@ uint8_t gMode = NOOP;              // Keeps track of the mode for the LED displa
 #define NUM_LEDS (MATRIX_HEIGHT * MATRIX_WIDTH)
 uint8_t BRIGHTNESS = 255;
 
-#define RAINBOW_SPEED 500       // Change this to modify the speed at which the rainbow changes
-#define SEGMENT_COUNT 3         // Change this to divide up the entire rainbow into segments.  1 = entire rainbow shown at once
+#define RAINBOW_SPEED 5000       // Change this to modify the speed at which the rainbow changes
+#define SEGMENT_COUNT 1         // Change this to divide up the entire rainbow into segments.  1 = entire rainbow shown at once
 #define NUM_OF_HUES 65535       // This is just for readability.  This is the number of values in a 16-bit number
 #define FRAMES_PER_SECOND 60 // How fast we want to show our frames
 
@@ -60,7 +63,6 @@ Adafruit_NeoMatrix matrix = Adafruit_NeoMatrix(MATRIX_WIDTH, MATRIX_HEIGHT, LED_
   NEO_MATRIX_ROWS + NEO_MATRIX_ZIGZAG,
   NEO_RGB            + NEO_KHZ800);
 
-uint16_t indexHue = 0;                                 // Keep track of this externally to ensure non-blocking code
 // uint32_t singleColorValue = strip.Color(0, 255, 0);   // Single color value updated via JSON message
 const uint32_t singleColorValue = matrix.Color(255, 215, 0);   // Single color value updated via JSON message
 
@@ -187,9 +189,6 @@ void setup() {
   setup_wifi();                         // Connect to the WiFi of the MQTT Broker
   client.setServer(mqtt_server, 1883);  // Connect to the MQTT Broker
   client.setCallback(callback);         // Register callback() as the callback funciton for messages from Broker
-  // strip.begin();                        // INITIALIZE NeoPixel strip object (REQUIRED)
-  // strip.show();                         // Turn OFF all pixels ASAP
-  // strip.setBrightness(50);              // Set BRIGHTNESS to about 1/5 (max = 255)  
   matrix.begin();
   matrix.clear();
   matrix.show();
@@ -203,15 +202,13 @@ void loop() {
   }
   client.loop();
 
-  sendKeepalive();
+  sendKeepAlive();
 
   switch(gMode){
     case(0):
-      turnOffBoardLED();
       turnOffMatrix();
       break;
     case(1):
-      turnOnBoardLED();
       matrixOneColor();
       break;
     case(2):
@@ -274,7 +271,7 @@ bool checkMessageValiditiy(char message){
   return true;
 }
 
-void sendKeepalive() {
+void sendKeepAlive() {
   unsigned long now = millis();
   if (now - lastMsg > 2000) {
     lastMsg = now;
@@ -313,18 +310,10 @@ void noop() {
   // Just chill.  Don't do anything.  Relax.  This is a 'No Operation'...
 }
 
-// void matrixOneColor() {
-//   uint16_t color = matrix.Color(255, 215, 0);   // Single color value updated via JSON message
-//   matrixOneColor(color);
-// }
-
-// void matrixOneColor(uint8_t red, uint8_t green, uint8_t blue) {
-//   matrixOneColor(matrix.Color(red, green, blue));
-// }
-
-void matrixOneColor() {
-  matrix.fillScreen(matrix.Color(255, 215, 0));
-  matrix.show();                          
+void matrixOneColor() {  
+  matrix.clear();
+  matrix.fillScreen(matrix.Color(255, 255, 255));
+  matrix.show();
   setMode(NOOP);
 }
 
@@ -333,7 +322,8 @@ void setSingleColorValue(uint16_t color) {
 }
 
 void matrixBrokenStrings() {
-  matrixOneColor();
+  matrix.clear();
+  matrix.fillScreen(matrix.Color(255, 255, 255));
   for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
     const uint8_t breakSize = random(3, 8);
     const uint8_t randomStart = random(8, 25);
@@ -344,85 +334,37 @@ void matrixBrokenStrings() {
   }
   matrix.show();
   setMode(NOOP);
-  // for(int i=0; i<15; i++)
-  // { 
-  //   strip.setPixelColor(i, strip.Color(255,215,0));
-  // }
-  // for(int i=15; i<20; i++)
-  // {
-  //   strip.setPixelColor(i, strip.Color(0,0,0));
-  // }
-  // for(int i=20; i<45; i++)
-  // { 
-  //   strip.setPixelColor(i, strip.Color(255,215,0));
-  // }
-  // for(int i=46; i<50; i++)
-  // {
-  //   strip.setPixelColor(i, strip.Color(0,0,0));
-  // }
-  // for(int i=50; i<80; i++)
-  // {
-  //   strip.setPixelColor(i, strip.Color(255,215,0));
-  // }
-  // for(int i=81; i<86; i++)
-  // {
-  //   strip.setPixelColor(i, strip.Color(0,0,0));
-  // }
-  // for(int i=86; i<118; i++)
-  // {
-  //   strip.setPixelColor(i, strip.Color(255,215,0));
-  // }
-  // for(int i=118; i<123; i++)
-  // {
-  //   strip.setPixelColor(i, strip.Color(0,0,0));
-  // }
-  // for(int i=123; i<148; i++)
-  // {
-  //   strip.setPixelColor(i, strip.Color(255,215,0));
-  // }
-  // for(int i=148; i<152; i++)
-  // {
-  //   strip.setPixelColor(i, strip.Color(0,0,0));
-  // }
-  // for(int i=152; i<185; i++)
-  // {
-  //   strip.setPixelColor(i, strip.Color(255,215,0));
-  // }
-  // for(int i=185; i<190; i++)
-  // {
-  //   strip.setPixelColor(i, strip.Color(0,0,0));
-  // }
-  // for(int i=190; i<203; i++)
-  // {
-  //   strip.setPixelColor(i, strip.Color(255,215,0));
-  // }
-  // strip.show();
-  // setMode(NOOP);
 }
+
+
+uint16_t indexHue = 0;                                 // Keep track of this externally to ensure non-blocking code
+const uint16_t hueWidthPerPanel = (NUM_OF_HUES/MATRIX_WIDTH)/SEGMENT_COUNT;
+const uint16_t panelOffset = (NUM_OF_HUES/SEGMENT_COUNT)*(unitID-1);
 
 void rainbow() {
   unsigned long now = millis();
-  // if (now - lastFrameTime > (1000/FRAMES_PER_SECOND)) {
-  // if (now - lastFrameTime > 100) {
-  //   lastFrameTime = now;
-    // indexHue = indexHue + RAINBOW_SPEED;  // This is a 16-bit number which will automatically roll over to 0 after 65535
-    indexHue++;
+  if (now - lastFrameTime > 10) {
+    lastFrameTime = now;
+    indexHue = indexHue + RAINBOW_SPEED;  // This is a 16-bit number which will automatically roll over to 0 after 65535
+    
     for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
       for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
-        matrix.drawPixel(x, y, matrix.ColorHSV(indexHue));
-        // matrix.drawPixel(x, y, matrix.ColorHSV(indexHue + (x * (NUM_OF_HUES/NUM_LEDS)/SEGMENT_COUNT)));
+        matrix.drawPixel(x, y, convertTo565(matrix.ColorHSV(indexHue + (x * hueWidthPerPanel) + panelOffset, 255, 100)));
       }
     }
     matrix.show();
-    delay(50);
-  // }
-  // for (uint8_t i = 0; i < NUM_LEDS; i++)
-  // {
-  //   uint32_t color = strip.ColorHSV(indexHue + (i* (NUM_OF_HUES/NUM_LEDS)/SEGMENT_COUNT));
-  //   strip.setPixelColor(i, color);
-  // }
-  // strip.show();
+  }
 }
+
+// void rainbowCycle(uint8_t wait) {
+//   for (int i = 0; i < 255; i++) {
+//     for (int j = 0; j < matrix.width(); j++) {
+//       matrix.setPixelColor(j, matrix.Color(sin(i + j * 0.01) * 127 + 128, sin(i + j * 0.02) * 127 + 128, sin(i + j * 0.03) * 127 + 128));
+//     }
+//     matrix.show();
+//     delay(wait);
+//   }
+// }
 
 void checkMatrix() {
   for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
@@ -450,3 +392,39 @@ uint16_t color24to16(uint32_t color) {
          ((uint16_t)(((color & 0x00FF00) >>  8) & 0xFC) << 3) |
                     (((color & 0x0000FF) >>  0)         >> 3);
 }
+
+
+// Function to convert 24-bit color to 16-bit 565
+uint16_t convertTo565(uint32_t color24) {
+  // Extract 8-bit red, green, and blue components
+  uint8_t r8 = (color24 >> 16) & 0xFF;
+  uint8_t g8 = (color24 >> 8) & 0xFF;
+  uint8_t b8 = color24 & 0xFF;
+  
+  // Convert to 565 format:
+  // Red:   5 bits  (r8 >> 3) shifted into bits 15-11
+  // Green: 6 bits  (g8 >> 2) shifted into bits 10-5
+  // Blue:  5 bits  (b8 >> 3) in bits 4-0
+  uint16_t color565 = ((r8 >> 3) << 11) | ((g8 >> 2) << 5) | (b8 >> 3);
+  // print565Components(color565);
+  return color565;
+}
+
+  // Function to extract and print the red, green, and blue components from a 565 color
+void print565Components(uint16_t color565) {
+  // Extract 5-bit red (bits 15-11)
+  uint8_t red = (color565 >> 11) & 0x1F;
+  // Extract 6-bit green (bits 10-5)
+  uint8_t green = (color565 >> 5) & 0x3F;
+  // Extract 5-bit blue (bits 4-0)
+  uint8_t blue = color565 & 0x1F;
+  
+  // Print the values to the Serial Monitor in base-10
+  Serial.print("Red: ");
+  Serial.println(red);
+  Serial.print("Green: ");
+  Serial.println(green);
+  Serial.print("Blue: ");
+  Serial.println(blue);
+}
+
