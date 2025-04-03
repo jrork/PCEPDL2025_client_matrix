@@ -23,8 +23,6 @@
 #include <WiFiUdp.h>            // For running OTA
 #include <ArduinoOTA.h>         // For running OTA
 
-
-#include "PCEPDL2025_Client.h"
 #define NOOP 42                 // Randomly picked 42, just needs to be a number not represented in loop()
 
 
@@ -46,17 +44,22 @@ uint8_t gMode = NOOP;              // Keeps track of the mode for the LED displa
 #define LED_PIN D2
 #define MATRIX_HEIGHT 6
 #define MATRIX_WIDTH 34
-#define NUM_LEDS (MATRIX_HEIGHT * MATRIX_WIDTH)
-uint8_t BRIGHTNESS = 255;
 
-#define RAINBOW_SPEED 5000       // Change this to modify the speed at which the rainbow changes
-#define SEGMENT_COUNT 1         // Change this to divide up the entire rainbow into segments.  1 = entire rainbow shown at once
+// Values for rainbow()
+#define RAINBOW_SPEED 500       // Change this to modify the speed at which the rainbow changes
+#define SEGMENT_COUNT 5         // Change this to divide up the entire rainbow into segments.  1 = entire rainbow shown at once
 #define NUM_OF_HUES 65535       // This is just for readability.  This is the number of values in a 16-bit number
 #define FRAMES_PER_SECOND 60 // How fast we want to show our frames
-
 unsigned long lastFrameTime = 0;   // Keeps track of the time the last rainbow frame was drawn
+uint16_t indexHue = 0;                                 // Keep track of this externally to ensure non-blocking code
+#define hueWidthPerPanel NUM_OF_HUES/(MATRIX_WIDTH*SEGMENT_COUNT)
+uint16_t panelOffset = (NUM_OF_HUES/SEGMENT_COUNT)*(unitID-1);
 
-// Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_RGB + NEO_KHZ800);
+// Values for matrixFadeIn()
+unsigned long lastFadeUpTime = 0;
+uint8_t upBrightness = 0;
+#define FADE_TIME 10000   // 10,000 ms for 10 sec fade
+
 
 Adafruit_NeoMatrix matrix = Adafruit_NeoMatrix(MATRIX_WIDTH, MATRIX_HEIGHT, LED_PIN,
   NEO_MATRIX_BOTTOM     + NEO_MATRIX_RIGHT +
@@ -186,6 +189,7 @@ void setup() {
   pinMode(BUILTIN_LED, OUTPUT);         // Initialize the BUILTIN_LED pin as an output
   Serial.begin(74880);                  // Start serial at the speed that prints out ESP8266 bootup messages
   getUnitID();                          // Retrieve the UnitID from EEPROM
+  recalculatePanelOffset();             // Recalulates the panelOffset
   setup_wifi();                         // Connect to the WiFi of the MQTT Broker
   client.setServer(mqtt_server, 1883);  // Connect to the MQTT Broker
   client.setCallback(callback);         // Register callback() as the callback funciton for messages from Broker
@@ -207,17 +211,19 @@ void loop() {
   switch(gMode){
     case(0):
       turnOffMatrix();
+      resetToDefaults();
       break;
     case(1):
-      matrixOneColor();
+      matrixFadeIn();
       break;
     case(2):
       matrixBrokenStrings();
       break;
     case(3):
-      rainbow();
+      gold();
       break;
     case(4):
+      rainbow();
       break;
     case(5):
       break;
@@ -266,6 +272,12 @@ void getUnitID() {
   Serial.println(unitID);
 }
 
+void recalculatePanelOffset() {
+  panelOffset = (NUM_OF_HUES/SEGMENT_COUNT)*(unitID-1);
+  Serial.print("\npanelOffset: ");
+  Serial.print(panelOffset);
+}
+
 // Check to ensure the message sent is one we are expecting
 bool checkMessageValiditiy(char message){
   return true;
@@ -310,6 +322,28 @@ void noop() {
   // Just chill.  Don't do anything.  Relax.  This is a 'No Operation'...
 }
 
+void resetToDefaults() {
+  upBrightness = 0;
+  indexHue = 0;
+}
+
+
+void matrixFadeIn() {
+  if (upBrightness < 255) {
+    unsigned long now = millis();
+    if (now - lastFadeUpTime > (FADE_TIME/255)) {
+      lastFadeUpTime = now;
+      upBrightness++;
+      matrix.fill(matrix.ColorHSV(180, 0, upBrightness));
+      matrix.show();
+    }
+  }
+  else {
+    matrix.fill(matrix.Color(255, 255, 255));
+    matrix.show();
+  }
+}
+
 void matrixOneColor() {  
   matrix.clear();
   matrix.fillScreen(matrix.Color(255, 255, 255));
@@ -336,11 +370,6 @@ void matrixBrokenStrings() {
   setMode(NOOP);
 }
 
-
-uint16_t indexHue = 0;                                 // Keep track of this externally to ensure non-blocking code
-const uint16_t hueWidthPerPanel = (NUM_OF_HUES/MATRIX_WIDTH)/SEGMENT_COUNT;
-const uint16_t panelOffset = (NUM_OF_HUES/SEGMENT_COUNT)*(unitID-1);
-
 void rainbow() {
   unsigned long now = millis();
   if (now - lastFrameTime > 10) {
@@ -353,6 +382,26 @@ void rainbow() {
       }
     }
     matrix.show();
+  }
+}
+
+void gold() {
+  unsigned long now = millis();
+  if (now - lastFrameTime > 50) {
+    lastFrameTime = now;
+    for (uint8_t y = 0; y <= MATRIX_HEIGHT; y++) {
+      for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
+        matrix.drawPixel(x, y, convertTo565(matrix.ColorHSV(8192, 255, 180)));
+      }
+    }
+    sparkle(30);
+    matrix.show();
+  }
+}
+
+void sparkle(uint8_t count) {
+  for (uint8_t i=0; i<count; i++) {
+      matrix.drawPixel(random(MATRIX_WIDTH), random(MATRIX_HEIGHT), convertTo565(matrix.ColorHSV(8192, 255, 255)));
   }
 }
 
