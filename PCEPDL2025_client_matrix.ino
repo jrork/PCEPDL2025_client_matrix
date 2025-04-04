@@ -19,14 +19,11 @@
 #include <Adafruit_NeoPixel.h>
 #include <Adafruit_NeoMatrix.h>
 #include <Adafruit_GFX.h>
-#include <ESP8266mDNS.h>        // For running OTA
-#include <WiFiUdp.h>            // For running OTA
-#include <ArduinoOTA.h>         // For running OTA
 
 #define NOOP 42                 // Randomly picked 42, just needs to be a number not represented in loop()
+#define FADE_OUT 17             // Randomly picked 17.  matrixFadeOut has an initial save that occurs at mode 4 and then iterates at mode 17
 
-
-uint8_t unitID = 0;  // Initally set to 0, updated from EEPROM
+uint8_t unitID = 0;             // Initally set to 0, updated from EEPROM
 
 const char* ssid ="ESPap";
 const char* password = "thereisnospoon";
@@ -37,36 +34,54 @@ PubSubClient client(espClient);
 unsigned long lastMsg = 0;
 #define MSG_BUFFER_SIZE	(50)
 char msg[MSG_BUFFER_SIZE];
-int ticker = 0;                    // Ticker for time since last action
+int ticker = 0;                    // Ticker for time since last heartbeat message
 
 uint8_t gMode = NOOP;              // Keeps track of the mode for the LED displays
 
 #define LED_PIN D2
 #define MATRIX_HEIGHT 6
 #define MATRIX_WIDTH 34
+#define MATRIX_SIZE (MATRIX_HEIGHT * MATRIX_WIDTH)
 
 // Values for rainbow()
-#define RAINBOW_SPEED 500       // Change this to modify the speed at which the rainbow changes
-#define SEGMENT_COUNT 5         // Change this to divide up the entire rainbow into segments.  1 = entire rainbow shown at once
-#define NUM_OF_HUES 65535       // This is just for readability.  This is the number of values in a 16-bit number
-#define FRAMES_PER_SECOND 60 // How fast we want to show our frames
+#define RAINBOW_SPEED 500          // Change this to modify the speed at which the rainbow changes
+#define SEGMENT_COUNT 5            // Change this to divide up the entire rainbow into segments.  1 = entire rainbow shown at once
+#define NUM_OF_HUES 65535          // This is just for readability.  This is the number of values in a 16-bit number
+#define FRAMES_PER_SECOND 60       // How fast we want to show our frames
 unsigned long lastFrameTime = 0;   // Keeps track of the time the last rainbow frame was drawn
-uint16_t indexHue = 0;                                 // Keep track of this externally to ensure non-blocking code
+uint16_t indexHue = 0;             // Keep track of this externally to ensure non-blocking code
 #define hueWidthPerPanel NUM_OF_HUES/(MATRIX_WIDTH*SEGMENT_COUNT)
 uint16_t panelOffset = (NUM_OF_HUES/SEGMENT_COUNT)*(unitID-1);
 
 // Values for matrixFadeIn()
+#define FADE_IN_TIME 10000         // 10,000 ms for 10 sec fade
 unsigned long lastFadeUpTime = 0;
 uint8_t upBrightness = 0;
-#define FADE_TIME 10000   // 10,000 ms for 10 sec fade
 
+// Values for matrixFadeOut()
+#define FADE_OUT_TIME 10000
+uint32_t originalColors[MATRIX_SIZE];        // Array to store each pixel's original color.
+unsigned long fadeStartTime = 0;             // Time when the fade started.
+unsigned long lastFadeUpdate = 0;            // Track time between updates to the fade 
+const unsigned long fadeUpdateInterval = 50; // Update fade every 50ms.
+
+// Gamma correction lookup table for gamma = 2.8
+const uint8_t gamma8[] PROGMEM = {
+  0, 0, 0, 1, 1, 1, 2, 2, 3, 3, 4, 4, 5, 6, 6, 7,
+  8, 9,10,11,12,13,14,15,16,17,18,19,21,22,23,24,
+  26,27,28,30,31,33,34,36,37,39,41,42,44,46,48,49,
+  51,53,55,57,59,61,63,65,67,69,71,74,76,78,81,83,
+  86,88,91,94,96,99,102,105,108,111,114,117,120,123,127,130,
+  133,137,140,144,147,151,155,159,163,167,171,175,179,183,188,192,
+  197,201,206,211,216,221,226,231,236,241,246,251,255
+  // Make sure there are 256 values in total.
+};
 
 Adafruit_NeoMatrix matrix = Adafruit_NeoMatrix(MATRIX_WIDTH, MATRIX_HEIGHT, LED_PIN,
   NEO_MATRIX_BOTTOM     + NEO_MATRIX_RIGHT +
   NEO_MATRIX_ROWS + NEO_MATRIX_ZIGZAG,
   NEO_RGB            + NEO_KHZ800);
 
-// uint32_t singleColorValue = strip.Color(0, 255, 0);   // Single color value updated via JSON message
 const uint32_t singleColorValue = matrix.Color(255, 215, 0);   // Single color value updated via JSON message
 
 void setup_wifi() {
@@ -189,13 +204,13 @@ void setup() {
   pinMode(BUILTIN_LED, OUTPUT);         // Initialize the BUILTIN_LED pin as an output
   Serial.begin(74880);                  // Start serial at the speed that prints out ESP8266 bootup messages
   getUnitID();                          // Retrieve the UnitID from EEPROM
-  recalculatePanelOffset();             // Recalulates the panelOffset
+  recalculatePanelOffset();             // Recalulates the panelOffset with new UnitID as an input
   setup_wifi();                         // Connect to the WiFi of the MQTT Broker
   client.setServer(mqtt_server, 1883);  // Connect to the MQTT Broker
   client.setCallback(callback);         // Register callback() as the callback funciton for messages from Broker
-  matrix.begin();
-  matrix.clear();
-  matrix.show();
+  matrix.begin();                       // Initialize the matrix
+  matrix.clear();                       // Clear the matrix
+  matrix.show();                        // Display the cleared matrix
   Serial.println("Setup Complete");
 }
 
@@ -220,12 +235,13 @@ void loop() {
       matrixBrokenStrings();
       break;
     case(3):
-      gold();
+      storeOriginalColors();
       break;
     case(4):
-      rainbow();
+      gold();
       break;
     case(5):
+      rainbow();
       break;
     case(6):
       break;
@@ -250,6 +266,7 @@ void loop() {
     case(16):
         break;
     case(17):
+      matrixFadeOut(FADE_OUT_TIME);
         break;
     case(NOOP):
     default:
@@ -331,7 +348,7 @@ void resetToDefaults() {
 void matrixFadeIn() {
   if (upBrightness < 255) {
     unsigned long now = millis();
-    if (now - lastFadeUpTime > (FADE_TIME/255)) {
+    if (now - lastFadeUpTime > (FADE_IN_TIME/255)) {     //not sure why i'm dividing by 255?
       lastFadeUpTime = now;
       upBrightness++;
       matrix.fill(matrix.ColorHSV(180, 0, upBrightness));
@@ -342,6 +359,59 @@ void matrixFadeIn() {
     matrix.fill(matrix.Color(255, 255, 255));
     matrix.show();
   }
+}
+
+// Call this function once before starting the fade-out to capture the original colors.
+void storeOriginalColors() {
+  for (uint16_t i = 0; i < MATRIX_SIZE; i++) {
+    originalColors[i] = matrix.getPixelColor(i);
+  }
+  fadeStartTime = millis();
+  setMode(FADE_OUT);
+}
+
+void matrixFadeOut(unsigned long fadeDuration) {
+  unsigned long now = millis();
+
+  // Throttle updates: run the fade code only every fadeUpdateInterval.
+  if (now - lastFadeUpdate < fadeUpdateInterval) {
+    return;
+  }
+  lastFadeUpdate = now;
+  
+  // Calculate elapsed time since fade start.
+  unsigned long elapsed = now - fadeStartTime;
+  if (elapsed > fadeDuration) {
+    elapsed = fadeDuration;
+  }
+  
+  // Calculate brightness factor: 1.0 at start, 0.0 at end.
+  float factor = float(fadeDuration - elapsed) / fadeDuration;
+  
+  // Process each pixel.
+  for (uint16_t i = 0; i < MATRIX_SIZE; i++) {
+    uint32_t origColor = originalColors[i];
+    
+    // Extract red, green, and blue components.
+    uint8_t r = (origColor >> 16) & 0xFF;
+    uint8_t g = (origColor >> 8) & 0xFF;
+    uint8_t b = origColor & 0xFF;
+    
+    // Apply brightness scaling.
+    r = (uint8_t)(r * factor);
+    g = (uint8_t)(g * factor);
+    b = (uint8_t)(b * factor);
+    
+    // Apply gamma correction via the lookup table.
+    uint8_t newR = pgm_read_byte(&gamma8[r]);
+    uint8_t newG = pgm_read_byte(&gamma8[g]);
+    uint8_t newB = pgm_read_byte(&gamma8[b]);
+    
+    // Recombine and set the new pixel color.
+    uint32_t newColor = matrix.Color(newR, newG, newB);
+    matrix.setPixelColor(i, newColor);
+  }
+  matrix.show();
 }
 
 void matrixOneColor() {  
@@ -362,7 +432,7 @@ void matrixBrokenStrings() {
     const uint8_t breakSize = random(3, 8);
     const uint8_t randomStart = random(8, 25);
     for (uint8_t x = randomStart; x < randomStart + breakSize; x++) {
-      if (x == MATRIX_WIDTH) break;   //bail out if we get past the end of the row but this should never happen
+      if (x >= MATRIX_WIDTH) break;   //bail out if we get past the end of the row but this should never happen
       matrix.drawPixel(x, y, matrix.Color(0,0,0));
     }
   }
@@ -415,7 +485,8 @@ void sparkle(uint8_t count) {
 //   }
 // }
 
-void checkMatrix() {
+// checkMatrix is a utility to just test each pixel from top-left to bottom-right
+void checkMatrix() {           
   for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
     for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
       matrix.drawPixel(x, y, matrix.Color(0,0,255));
