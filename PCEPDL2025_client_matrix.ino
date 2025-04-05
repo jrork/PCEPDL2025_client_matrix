@@ -351,12 +351,12 @@ void matrixFadeIn() {
     if (now - lastFadeUpTime > (FADE_IN_TIME/255)) {     //not sure why i'm dividing by 255?
       lastFadeUpTime = now;
       upBrightness++;
-      matrix.fill(matrix.ColorHSV(180, 0, upBrightness));
+      matrix.fill(matrix.ColorHSV(180, 0, upBrightness));  //first value doesn't matter because saturation is 0 i.e. white
       matrix.show();
     }
   }
   else {
-    matrix.fill(matrix.Color(255, 255, 255));
+    matrix.fill(matrix.ColorHSV(180, 0, 255));
     matrix.show();
   }
 }
@@ -448,7 +448,7 @@ void rainbow() {
     
     for (uint8_t y = 0; y < MATRIX_HEIGHT; y++) {
       for (uint8_t x = 0; x < MATRIX_WIDTH; x++) {
-        matrix.drawPixel(x, y, convertTo565(matrix.ColorHSV(indexHue + (x * hueWidthPerPanel) + panelOffset, 255, 100)));
+        matrix.drawPixel(x, y, convertTo565(matrix.ColorHSV(indexHue + (x * hueWidthPerPanel) + panelOffset, 255, 255)));
       }
     }
     matrix.show();
